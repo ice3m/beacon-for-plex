@@ -50,8 +50,6 @@ export class MpvClient extends EventEmitter {
    * its video output initializes only once.
    */
   async start(mpvPath: string, wid: string, globalArgs: string[]): Promise<void> {
-    const logFile = join(app.getPath('userData'), 'mpv.log')
-    console.log('[mpv] verbose log ->', logFile)
     const args = [
       `--wid=${wid}`,
       `--input-ipc-server=${this.pipePath}`,
@@ -59,8 +57,6 @@ export class MpvClient extends EventEmitter {
       '--osc=no',
       '--keep-open=no',
       '--no-config',
-      // Diagnostic: full mpv log to disk (verbose; does not touch stderr).
-      `--log-file=${logFile}`,
       // Bound a stalled network read so a dropped connection surfaces promptly
       // (as end-of-file) instead of hanging — playback.ts then auto-resumes from
       // the current position. (Applies to mpv's HTTP/curl + lavf backends.)

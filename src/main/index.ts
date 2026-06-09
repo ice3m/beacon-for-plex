@@ -1,12 +1,21 @@
 import { app, BrowserWindow, Menu, nativeImage, shell, Tray } from 'electron'
-import { existsSync, appendFileSync } from 'node:fs'
+import { existsSync, appendFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
-// Diagnostic: tee main-process console output to a file so playback issues can
-// be traced on packaged builds (where stdout is not visible). Written next to
-// the app's config; path is logged once at startup.
+// Tee main-process console output to a file so issues can be traced on packaged
+// builds (where stdout isn't visible) without shipping a debug build. The file
+// is RESET on each launch so it only ever holds the current session and never
+// grows unbounded — to report a problem: reproduce it, then send main.log.
 try {
   const logPath = join(app.getPath('userData'), 'main.log')
+  try {
+    writeFileSync(logPath, '')
+    // Remove the stale verbose mpv.log left by earlier diagnostic builds.
+    const oldMpvLog = join(app.getPath('userData'), 'mpv.log')
+    if (existsSync(oldMpvLog)) unlinkSync(oldMpvLog)
+  } catch {
+    /* ignore */
+  }
   const tee = (orig: (...a: unknown[]) => void) => (...args: unknown[]): void => {
     orig(...args)
     try {
