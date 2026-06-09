@@ -4,6 +4,10 @@
  * item short and user-facing (a single fix/change per bullet).
  */
 export const RELEASE_NOTES: Record<string, string[]> = {
+  '0.1.8': [
+    'Fixed playback dropping mid-stream (often right after seeking, especially on remote connections) — the app now reconnects and resumes from where it left off automatically.',
+    'If a stream fails to start, you now get a “Try again” option instead of an endless Loading screen.'
+  ],
   '0.1.7': [
     'Added this “What’s New” dialog — a quick summary of fixes and changes after each update.'
   ],

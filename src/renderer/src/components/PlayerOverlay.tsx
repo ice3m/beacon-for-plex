@@ -189,13 +189,21 @@ export function PlayerOverlay(): JSX.Element {
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
           {st.error ? (
             <div className="px-6 text-center">
-              <p className="mb-3 text-sm text-red-400">{st.error}</p>
-              <button
-                onClick={() => window.plex.playback.stop()}
-                className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white transition hover:bg-white/10"
-              >
-                Close
-              </button>
+              <p className="mb-4 text-sm text-red-400">{st.error}</p>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  onClick={() => window.plex.playback.retry()}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={() => window.plex.playback.stop()}
+                  className="rounded-lg border border-white/20 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-3 text-white/80">

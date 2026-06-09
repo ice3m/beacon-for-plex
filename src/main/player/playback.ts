@@ -221,6 +221,17 @@ function stopTranscodePing(): void {
 // initializes once. The 'exit' handler (attached in ensureMpv) clears it.
 let mpv: MpvClient | null = null
 
+// Fires if a load never produces its first frame (stream dropped / mpv wedged):
+// surfaces a retryable error instead of an infinite Loading screen.
+let loadWatchdog: ReturnType<typeof setTimeout> | null = null
+
+// App-level auto-resume bookkeeping. When a Direct Play stream drops mid-file
+// (mpv ends it early), we reload from the current position. These bound the
+// retries so a genuinely broken stream can't loop forever.
+let streamErrorReloads = 0
+let lastStreamErrorAt = 0
+const MAX_STREAM_RELOADS = 6
+
 /**
  * Ensure the persistent mpv process + window exist, with event listeners
  * attached exactly once. Returns the live client.
@@ -252,6 +263,10 @@ async function ensureMpv(): Promise<MpvClient> {
   })
   // First frame of the CURRENT load is ready — drop the black load screen.
   client.on('playback-restart', () => {
+    if (loadWatchdog) {
+      clearTimeout(loadWatchdog)
+      loadWatchdog = null
+    }
     if (session && !session.loaded) {
       session.loaded = true
       push()
@@ -260,18 +275,48 @@ async function ensureMpv(): Promise<MpvClient> {
   // Natural end-of-file → auto-play the next episode (loads in place, no respawn).
   client.on('end-file', (reason: string) => {
     const s = session
+    console.log('[player] end-file reason=', reason, 'at', s ? (s.timeMs / 1000).toFixed(1) + 's' : 'n/a')
     if (!s) return
-    if (reason === 'eof' && s.prefs.autoPlayNext && s.nextRatingKey && !s.upNextCancelled) {
-      start(s.serverId, s.nextRatingKey, { quality: s.quality, preserveView: true }).catch((e) =>
-        console.error('[player] auto-advance failed:', (e as Error).message)
-      )
-    } else if (reason === 'error') {
-      // A dead stream (e.g. the PMS reaped the transcode session) ends the file
-      // with 'error'. Don't die silently — surface it so the user isn't staring
-      // at a frozen frame wondering what happened.
-      console.error('[player] stream ended unexpectedly (mpv end-file: error)')
+
+    const dur = s.durationMs || s.info.durationMs
+    // Generous end window so content that finishes a little before its reported
+    // duration is treated as a real end (not a drop to reload in a loop).
+    const nearEnd = dur > 0 && s.timeMs >= dur - 10000
+
+    // Genuine end of content → auto-advance to the next episode if applicable.
+    if (reason === 'eof' && nearEnd) {
+      if (s.prefs.autoPlayNext && s.nextRatingKey && !s.upNextCancelled) {
+        start(s.serverId, s.nextRatingKey, { quality: s.quality, preserveView: true }).catch((e) =>
+          console.error('[player] auto-advance failed:', (e as Error).message)
+        )
+      }
+      return
+    }
+
+    // Premature end mid-playback — a dropped connection that mpv surfaced as
+    // 'error' OR as a bogus 'eof' far from the real duration (very common on
+    // remote Direct Play, especially right after a seek). Transparently
+    // auto-resume from the current position: our own backend-agnostic reconnect.
+    if ((reason === 'error' || reason === 'eof') && !nearEnd && s.timeMs > 1000) {
+      const now = Date.now()
+      // A long stable stretch since the last drop resets the retry budget.
+      if (now - lastStreamErrorAt > 30000) streamErrorReloads = 0
+      if (streamErrorReloads < MAX_STREAM_RELOADS) {
+        streamErrorReloads++
+        lastStreamErrorAt = now
+        const at = Math.floor(s.timeMs / 1000)
+        console.warn(`[player] stream dropped mid-play; auto-resuming at ${at}s (try ${streamErrorReloads})`)
+        start(s.serverId, s.ratingKey, {
+          quality: s.quality,
+          startMs: s.timeMs,
+          preserveView: true
+        }).catch((e) => console.error('[player] auto-resume failed:', (e as Error).message))
+        return
+      }
+      // Repeated drops in quick succession → stop fighting it; let the user act.
+      console.error('[player] stream keeps dropping; giving up after', streamErrorReloads, 'tries')
       stopTranscodePing()
-      push({ error: 'Playback stopped: the stream ended unexpectedly. Try again or pick a different quality.' })
+      push({ error: 'Playback keeps dropping. Check your connection or try a different quality.' })
     }
   })
   client.on('error', (err: Error) => {
@@ -280,8 +325,12 @@ async function ensureMpv(): Promise<MpvClient> {
   })
   client.on('exit', () => {
     console.log('[player] mpv process exited')
+    // If this client has already been replaced (e.g. a stalled-load recovery
+    // spawned a fresh mpv), its late exit must NOT clobber the new instance.
+    if (mpv !== client) return
     if (session) report('stopped', true)
     stopTranscodePing()
+    if (loadWatchdog) clearTimeout(loadWatchdog)
     mpv = null
     session = null
     hidePlayerWindow()
@@ -371,6 +420,11 @@ function upNextPrompt(s: Session): PlaybackStatus['upNext'] {
 function onTime(seconds: number): void {
   if (!session || typeof seconds !== 'number') return
   session.timeMs = seconds * 1000
+  // A sustained stretch of playback after an auto-resume means we recovered —
+  // restore the full retry budget so a later, unrelated drop gets its own tries.
+  if (streamErrorReloads > 0 && Date.now() - lastStreamErrorAt > 25000) {
+    streamErrorReloads = 0
+  }
   checkSkip()
   report('playing')
   push()
@@ -414,6 +468,12 @@ export async function start(
 ): Promise<{ ok: boolean; error?: string }> {
   if (!mainWindow) return { ok: false, error: 'No window' }
   console.log('[player] start', ratingKey)
+  // A fresh, user-initiated play resets the auto-resume retry budget (internal
+  // reloads pass preserveView so they keep counting toward the cap).
+  if (!opts.preserveView) {
+    streamErrorReloads = 0
+    lastStreamErrorAt = 0
+  }
 
   let info: PlaybackInfo
   try {
@@ -563,18 +623,52 @@ export async function start(
   report('playing', true)
   push()
 
-  // Safety net: never leave the black load screen up if 'playback-restart' is missed.
-  setTimeout(() => {
+  // Watchdog: if the first frame never arrives (stream dropped before decode, or
+  // mpv wedged on a dead socket), don't sit on an infinite Loading screen —
+  // surface a retryable error. `retry()` then respawns a clean mpv.
+  if (loadWatchdog) clearTimeout(loadWatchdog)
+  loadWatchdog = setTimeout(() => {
+    loadWatchdog = null
     if (session === s && !s.loaded) {
-      s.loaded = true
-      push()
+      console.warn('[player] first frame never arrived (12s) — surfacing retry')
+      push({ error: "Couldn't start playback — the stream may have dropped." })
     }
-  }, 10000)
+  }, 12000)
   return { ok: true }
+}
+
+/**
+ * Recover from a stalled/wedged load: tear down the current mpv and start the
+ * same item again on a fresh process. Triggered by the overlay's "Try again".
+ */
+export function retry(): void {
+  if (!session) return
+  const { serverId, ratingKey, quality, timeMs } = session
+  if (loadWatchdog) {
+    clearTimeout(loadWatchdog)
+    loadWatchdog = null
+  }
+  // Drop the (likely wedged) mpv; clear refs first so its late 'exit' is a no-op
+  // (the exit handler bails when `mpv !== client`).
+  const dead = mpv
+  mpv = null
+  session = null
+  try {
+    dead?.quit()
+  } catch {
+    /* ignore */
+  }
+  // Brief delay so the old process is gone before we spawn a fresh one.
+  setTimeout(() => {
+    void start(serverId, ratingKey, { quality, startMs: timeMs }).catch((e) =>
+      console.error('[player] retry failed:', (e as Error).message)
+    )
+  }, 700)
 }
 
 /** Stop playback: report to Plex, stop the current file (mpv stays idle), hide. */
 export function stop(): void {
+  console.log('[player] stop requested')
   stopTranscodePing()
   if (session) {
     report('stopped', true) // tell Plex Now Playing ended

@@ -562,6 +562,8 @@ export interface PlexApi {
       opts?: { startMs?: number; quality?: string }
     ) => Promise<{ ok: boolean; error?: string }>
     stop: () => Promise<void>
+    /** Recover a stalled load by respawning mpv and replaying the same item. */
+    retry: () => Promise<void>
     playPause: () => Promise<void>
     /** Seek to an absolute position in milliseconds. */
     seekTo: (ms: number) => Promise<void>

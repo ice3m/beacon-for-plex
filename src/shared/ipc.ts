@@ -70,6 +70,7 @@ export const IPC = {
   playback: {
     start: 'playback:start',
     stop: 'playback:stop',
+    retry: 'playback:retry',
     playPause: 'playback:playPause',
     seekTo: 'playback:seekTo',
     seekBy: 'playback:seekBy',

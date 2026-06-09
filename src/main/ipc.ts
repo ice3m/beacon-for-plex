@@ -317,6 +317,7 @@ export function registerIpcHandlers(): void {
       player.start(serverId, ratingKey, opts)
   )
   ipcMain.handle(IPC.playback.stop, () => player.stop())
+  ipcMain.handle(IPC.playback.retry, () => player.retry())
   ipcMain.handle(IPC.playback.playPause, () => player.playPause())
   ipcMain.handle(IPC.playback.seekTo, (_e, ms: number) => player.seekTo(ms))
   ipcMain.handle(IPC.playback.seekBy, (_e, seconds: number) => player.seekBy(seconds))

@@ -99,6 +99,7 @@ const api: PlexApi = {
     start: (serverId, ratingKey, opts) =>
       ipcRenderer.invoke(IPC.playback.start, serverId, ratingKey, opts),
     stop: () => ipcRenderer.invoke(IPC.playback.stop),
+    retry: () => ipcRenderer.invoke(IPC.playback.retry),
     playPause: () => ipcRenderer.invoke(IPC.playback.playPause),
     seekTo: (ms) => ipcRenderer.invoke(IPC.playback.seekTo, ms),
     seekBy: (seconds) => ipcRenderer.invoke(IPC.playback.seekBy, seconds),

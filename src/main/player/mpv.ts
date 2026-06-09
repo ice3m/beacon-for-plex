@@ -57,13 +57,9 @@ export class MpvClient extends EventEmitter {
       '--osc=no',
       '--keep-open=no',
       '--no-config',
-      // Resilient HTTP streaming: after mpv buffers ahead it stops reading, so
-      // the PMS (or the OS) closes the idle keep-alive socket after ~60s. Without
-      // reconnect, the next read hits a dead socket → EOF → the file ends and
-      // playback "freezes" ~1 min in (classic on Direct Play). These ffmpeg
-      // AVOptions make the lavf stream layer transparently reconnect + resume.
-      '--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30',
-      // Don't sit forever on a stalled read before giving up/reconnecting.
+      // Bound a stalled network read so a dropped connection surfaces promptly
+      // (as end-of-file) instead of hanging — playback.ts then auto-resumes from
+      // the current position. (Applies to mpv's HTTP/curl + lavf backends.)
       '--network-timeout=20',
       // Render via dxinterop (D3D9Ex + OpenGL) — reconfigures reliably on this
       // transparent window where the default D3D11 output did not.
