@@ -4,6 +4,9 @@
  * item short and user-facing (a single fix/change per bullet).
  */
 export const RELEASE_NOTES: Record<string, string[]> = {
+  '0.1.9': [
+    'More robust recovery from dropped streams: playback that stalls mid-stream now auto-resumes from where it froze, even when no error is reported.'
+  ],
   '0.1.8': [
     'Fixed playback dropping mid-stream (often right after seeking, especially on remote connections) — the app now reconnects and resumes from where it left off automatically.',
     'If a stream fails to start, you now get a “Try again” option instead of an endless Loading screen.'

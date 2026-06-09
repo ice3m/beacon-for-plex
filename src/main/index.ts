@@ -1,6 +1,29 @@
 import { app, BrowserWindow, Menu, nativeImage, shell, Tray } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+// Diagnostic: tee main-process console output to a file so playback issues can
+// be traced on packaged builds (where stdout is not visible). Written next to
+// the app's config; path is logged once at startup.
+try {
+  const logPath = join(app.getPath('userData'), 'main.log')
+  const tee = (orig: (...a: unknown[]) => void) => (...args: unknown[]): void => {
+    orig(...args)
+    try {
+      appendFileSync(logPath, args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n')
+    } catch {
+      /* ignore */
+    }
+  }
+  /* eslint-disable no-console */
+  console.log = tee(console.log.bind(console))
+  console.warn = tee(console.warn.bind(console))
+  console.error = tee(console.error.bind(console))
+  /* eslint-enable no-console */
+  console.log('[main] log ->', logPath, 'started', new Date().toISOString())
+} catch {
+  /* ignore */
+}
 import { registerIpcHandlers } from './ipc'
 import { registerImageProtocol, registerImageScheme } from './plex/images'
 import { hostname } from 'node:os'

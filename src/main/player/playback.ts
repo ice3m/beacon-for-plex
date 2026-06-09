@@ -231,6 +231,45 @@ let loadWatchdog: ReturnType<typeof setTimeout> | null = null
 let streamErrorReloads = 0
 let lastStreamErrorAt = 0
 const MAX_STREAM_RELOADS = 6
+// Timestamp of the last forward progress (time-pos advance / load / unpause).
+// Drives the stall detector below.
+let lastProgressAt = 0
+
+/**
+ * Reload the current item from its current position — our backend-agnostic
+ * reconnect for a dropped/stalled Direct Play stream. Bounded retries (reset
+ * after a stable stretch); surfaces an error only once it keeps failing.
+ */
+function attemptAutoResume(why: string): void {
+  const s = session
+  if (!s) return
+  const now = Date.now()
+  if (now - lastStreamErrorAt > 30000) streamErrorReloads = 0
+  if (streamErrorReloads >= MAX_STREAM_RELOADS) {
+    console.error('[player] giving up after', streamErrorReloads, 'auto-resumes')
+    stopTranscodePing()
+    push({ error: 'Playback keeps dropping. Check your connection or try a different quality.' })
+    return
+  }
+  streamErrorReloads++
+  lastStreamErrorAt = now
+  lastProgressAt = now // don't immediately re-trigger the stall detector
+  console.warn(`[player] auto-resume (${why}) at ${Math.floor(s.timeMs / 1000)}s (try ${streamErrorReloads})`)
+  start(s.serverId, s.ratingKey, { quality: s.quality, startMs: s.timeMs, preserveView: true }).catch(
+    (e) => console.error('[player] auto-resume failed:', (e as Error).message)
+  )
+}
+
+// Stall detector: a hands-off mid-stream drop often leaves mpv wedged on a dead
+// socket WITHOUT emitting end-file, so playback just hangs. If position stops
+// advancing for ~15s while we should be playing, auto-resume from where we are.
+setInterval(() => {
+  const s = session
+  if (!s || s.paused || !s.loaded) return
+  if (lastProgressAt && Date.now() - lastProgressAt > 15000) {
+    attemptAutoResume('stall')
+  }
+}, 5000)
 
 /**
  * Ensure the persistent mpv process + window exist, with event listeners
@@ -257,6 +296,8 @@ async function ensureMpv(): Promise<MpvClient> {
       push()
     } else if (name === 'pause') {
       session.paused = !!data
+      // Reset the stall clock on unpause so resuming doesn't look like a stall.
+      if (!data) lastProgressAt = Date.now()
       report(session.paused ? 'paused' : 'playing', true)
       push()
     }
@@ -298,25 +339,7 @@ async function ensureMpv(): Promise<MpvClient> {
     // remote Direct Play, especially right after a seek). Transparently
     // auto-resume from the current position: our own backend-agnostic reconnect.
     if ((reason === 'error' || reason === 'eof') && !nearEnd && s.timeMs > 1000) {
-      const now = Date.now()
-      // A long stable stretch since the last drop resets the retry budget.
-      if (now - lastStreamErrorAt > 30000) streamErrorReloads = 0
-      if (streamErrorReloads < MAX_STREAM_RELOADS) {
-        streamErrorReloads++
-        lastStreamErrorAt = now
-        const at = Math.floor(s.timeMs / 1000)
-        console.warn(`[player] stream dropped mid-play; auto-resuming at ${at}s (try ${streamErrorReloads})`)
-        start(s.serverId, s.ratingKey, {
-          quality: s.quality,
-          startMs: s.timeMs,
-          preserveView: true
-        }).catch((e) => console.error('[player] auto-resume failed:', (e as Error).message))
-        return
-      }
-      // Repeated drops in quick succession → stop fighting it; let the user act.
-      console.error('[player] stream keeps dropping; giving up after', streamErrorReloads, 'tries')
-      stopTranscodePing()
-      push({ error: 'Playback keeps dropping. Check your connection or try a different quality.' })
+      attemptAutoResume(`end-file:${reason}`)
     }
   })
   client.on('error', (err: Error) => {
@@ -419,6 +442,8 @@ function upNextPrompt(s: Session): PlaybackStatus['upNext'] {
 
 function onTime(seconds: number): void {
   if (!session || typeof seconds !== 'number') return
+  // Forward progress only — guards against mpv reporting a static position.
+  if (seconds * 1000 !== session.timeMs) lastProgressAt = Date.now()
   session.timeMs = seconds * 1000
   // A sustained stretch of playback after an auto-resume means we recovered —
   // restore the full retry budget so a later, unrelated drop gets its own tries.
@@ -620,6 +645,7 @@ export async function start(
   // session would make the new item start paused — force it to play.
   client.setProperty('pause', false).catch(() => {})
   session.paused = false
+  lastProgressAt = Date.now() // start the stall clock for this load
   report('playing', true)
   push()
 
