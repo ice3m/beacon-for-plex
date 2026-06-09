@@ -45,6 +45,8 @@ interface PersistedState {
   watchlist?: Record<string, WatchlistEntry[]>
   /** Remembered audio/subtitle choices per show (or movie) ratingKey. */
   showPrefs?: Record<string, ShowMediaPref>
+  /** App version last launched — drives the one-time "What's New" dialog. */
+  lastSeenVersion?: string
 }
 
 /** Per-show (or per-movie) remembered track choices, applied on next playback. */
@@ -259,6 +261,17 @@ export function setWindowFlags(flags: { maximized?: boolean; fullscreen?: boolea
   const s = load()
   if (flags.maximized !== undefined) s.windowMaximized = flags.maximized
   if (flags.fullscreen !== undefined) s.windowFullScreen = flags.fullscreen
+  persist()
+}
+
+/** App version last launched (null on first-ever run). */
+export function getLastSeenVersion(): string | null {
+  return load().lastSeenVersion ?? null
+}
+
+export function setLastSeenVersion(version: string): void {
+  const s = load()
+  s.lastSeenVersion = version
   persist()
 }
 

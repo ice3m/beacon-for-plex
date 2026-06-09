@@ -627,6 +627,12 @@ export interface PlexApi {
     onStatus: (cb: (status: UpdateStatus) => void) => () => void
     /** Quit and install a downloaded update. */
     install: () => Promise<void>
+    /**
+     * Itemized "What's New" notes for this launch when it's a fresh upgrade
+     * to a version that has notes; null otherwise (and only ever returns
+     * non-null once per upgrade).
+     */
+    whatsNew: () => Promise<{ version: string; items: string[] } | null>
   }
 }
 

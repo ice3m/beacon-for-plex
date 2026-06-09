@@ -148,7 +148,8 @@ const api: PlexApi = {
       ipcRenderer.on(IPC.updates.status, listener)
       return () => ipcRenderer.removeListener(IPC.updates.status, listener)
     },
-    install: () => ipcRenderer.invoke(IPC.updates.install)
+    install: () => ipcRenderer.invoke(IPC.updates.install),
+    whatsNew: () => ipcRenderer.invoke(IPC.updates.whatsNew)
   }
 }
 

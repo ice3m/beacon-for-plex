@@ -1,4 +1,5 @@
-import { ipcMain, shell } from 'electron'
+import { app, ipcMain, shell } from 'electron'
+import { RELEASE_NOTES } from '@shared/releaseNotes'
 import type { AuthStatus, SectionQuery } from '@shared/types'
 import { IPC } from '@shared/ipc'
 import { getCurrentAccount, logout, startLogin, waitForLogin } from './plex/auth'
@@ -62,8 +63,10 @@ import { installUpdate } from './updater'
 import type { PlaybackPrefs } from '@shared/types'
 import {
   getHiddenHistoryUsers,
+  getLastSeenVersion,
   getSelectedServerId,
   setHistoryUserHidden,
+  setLastSeenVersion,
   setLibraryHidden,
   setLibraryIcon,
   setLibraryOrder,
@@ -330,6 +333,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.playback.cancelUpNext, () => player.cancelUpNext())
   ipcMain.handle(IPC.playback.skip, () => player.skip())
   ipcMain.handle(IPC.updates.install, () => installUpdate())
+  ipcMain.handle(IPC.updates.whatsNew, () => {
+    const version = app.getVersion()
+    const last = getLastSeenVersion()
+    // Record this launch's version so the dialog shows only once per version.
+    if (last !== version) setLastSeenVersion(version)
+    // Show whenever this launch is a version we haven't shown yet AND we have
+    // notes authored for it. (We intentionally don't require a prior recorded
+    // version, so the first update that ships this feature still shows notes.)
+    if (last !== version && RELEASE_NOTES[version]) {
+      return { version, items: RELEASE_NOTES[version] }
+    }
+    return null
+  })
   ipcMain.handle(IPC.playback.mediaInfo, () => player.getMediaInfo())
   ipcMain.handle(IPC.playback.audioTracks, () => player.audioTracks())
   ipcMain.handle(IPC.playback.subtitleOptions, () => player.subtitleOptions())

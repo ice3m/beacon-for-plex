@@ -10,6 +10,7 @@ import { Shell } from './components/Shell'
 import { MiniPlayer } from './components/MiniPlayer'
 import { TitleBar } from './components/TitleBar'
 import { UpdateBanner } from './components/UpdateBanner'
+import { WhatsNew } from './components/WhatsNew'
 import { Loading } from './components/States'
 
 export default function App(): JSX.Element {
@@ -62,6 +63,7 @@ function Root(): JSX.Element {
         {auth.kind === 'authed' && <ServerGate />}
       </main>
       <UpdateBanner />
+      <WhatsNew />
     </div>
   )
 }

@@ -110,7 +110,9 @@ export const IPC = {
   updates: {
     install: 'updates:install',
     /** Main → renderer event channel for auto-update progress. */
-    status: 'updates:status'
+    status: 'updates:status',
+    /** Returns one-time "What's New" notes when this launch is a fresh upgrade. */
+    whatsNew: 'updates:whatsNew'
   }
 } as const
 
