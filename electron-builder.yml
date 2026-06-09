@@ -1,0 +1,47 @@
+appId: com.thomas.plexdesktop
+productName: Plex Desktop
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+  buildResources: build
+
+# Bundled app code (electron-vite output) + runtime deps (added automatically).
+files:
+  - out/**
+  - package.json
+
+# mpv + the app icon live outside the asar so mpv.exe can be executed and the
+# window icon is loadable at runtime (resolved via process.resourcesPath).
+extraResources:
+  - from: resources/mpv
+    to: mpv
+  - from: resources/icon.png
+    to: icon.png
+
+win:
+  target: nsis
+  icon: build/icon.png
+  # Space-free name so the on-disk file, latest.yml, and the uploaded GitHub
+  # asset all match (avoids updater 404s from space→dash normalization).
+  artifactName: Plex-Desktop-Setup-${version}.${ext}
+
+# Single installer that installs into Program Files (per-machine).
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Plex Desktop
+  # Custom NSIS script: relabel "Install" → "Update" when already installed.
+  include: build/installer.nsh
+
+# Update feed: GitHub Releases. The app's electron-updater reads the latest
+# release of this repo on launch. Replace `owner` with your GitHub username (and
+# `repo` if you name it differently). Publish releases with `npm run release`
+# (needs a GH_TOKEN env var with repo/contents write scope).
+publish:
+  provider: github
+  owner: ice3m
+  repo: beacon-for-plex

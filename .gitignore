@@ -1,0 +1,14 @@
+node_modules
+dist
+out
+.DS_Store
+*.log
+.env
+.env.*
+
+# Bundled mpv binary (~112 MB) — exceeds GitHub's file limit; place it locally
+# under resources/mpv/ before building (see RELEASING.md / README).
+resources/mpv/
+# Build artifacts / installers
+*.exe
+*.blockmap
