@@ -114,7 +114,11 @@ function ensurePlayerWindow(): string {
       webPreferences: {
         preload: join(__dirname, '../preload/index.mjs'),
         sandbox: false,
-        contextIsolation: true
+        contextIsolation: true,
+        // The overlay is never the OS-focused window (mpv's surface sits under
+        // it), so Electron's default background throttling would starve its
+        // renderer — freezing the seek bar / status updates that arrive via IPC.
+        backgroundThrottling: false
       }
     })
     playerWin.setMenuBarVisibility(false)

@@ -308,8 +308,10 @@ export function registerIpcHandlers(): void {
   startAutoSync()
 
   // --- Playback ---
-  ipcMain.handle(IPC.playback.start, (_e, serverId: string, ratingKey: string) =>
-    player.start(serverId, ratingKey)
+  ipcMain.handle(
+    IPC.playback.start,
+    (_e, serverId: string, ratingKey: string, opts?: { startMs?: number; quality?: string }) =>
+      player.start(serverId, ratingKey, opts)
   )
   ipcMain.handle(IPC.playback.stop, () => player.stop())
   ipcMain.handle(IPC.playback.playPause, () => player.playPause())

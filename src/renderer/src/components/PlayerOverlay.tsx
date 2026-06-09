@@ -23,6 +23,9 @@ export function PlayerOverlay(): JSX.Element {
   const [st, setSt] = useState<PlaybackStatus>({ active: false })
   const [visible, setVisible] = useState(true)
   const [scrub, setScrub] = useState<number | null>(null)
+  const scrubRef = useRef<number | null>(null)
+  const draggingRef = useRef(false)
+  const scrubSafety = useRef<ReturnType<typeof setTimeout>>()
   const [menu, setMenu] = useState<'none' | 'settings'>('none')
   const [audio, setAudio] = useState<MediaTrack[]>([])
   const [subs, setSubs] = useState<SubtitleOption[]>([])
@@ -38,8 +41,38 @@ export function PlayerOverlay(): JSX.Element {
     const unsub = window.plex.playback.onStatus((s) => {
       setSt(s)
       pausedRef.current = !!s.paused
+      // Release the held scrub position only once playback has actually caught
+      // up to where the user dropped it. Clearing earlier would snap the slider
+      // back to live time, and that value-change fires a spurious onChange →
+      // a second seek that reverts the first. Hold until convergence.
+      if (
+        !draggingRef.current &&
+        scrubRef.current != null &&
+        Math.abs((s.timeMs ?? 0) - scrubRef.current) < 2500
+      ) {
+        scrubRef.current = null
+        clearTimeout(scrubSafety.current)
+        setScrub(null)
+      }
     })
     return unsub
+  }, [])
+
+  // Commit the held scrub to a single real seek when the drag ends. We do NOT
+  // clear `scrub` here — it stays pinned to the target so the slider value never
+  // snaps back to live (which would fire a spurious onChange → reverting seek).
+  // The onStatus convergence check above releases it once playback arrives; a
+  // safety timer clears it if the seek never lands.
+  const commitScrub = useCallback(() => {
+    draggingRef.current = false
+    const v = scrubRef.current
+    if (v == null) return
+    void window.plex.playback.seekTo(v)
+    clearTimeout(scrubSafety.current)
+    scrubSafety.current = setTimeout(() => {
+      scrubRef.current = null
+      setScrub(null)
+    }, 5000)
   }, [])
 
   const bump = useCallback(() => {
@@ -277,11 +310,22 @@ export function PlayerOverlay(): JSX.Element {
             min={0}
             max={dur || 1}
             value={time}
-            onChange={(e) => setScrub(Number(e.target.value))}
-            onMouseUp={() => {
-              if (scrub != null) void window.plex.playback.seekTo(scrub)
-              setScrub(null)
+            // Capture the pointer on press so the matching release/lost-capture
+            // is GUARANTEED to fire on this element — even when the mouse is let
+            // go over the mpv video (a native child window that otherwise eats
+            // the event). That release is the single, reliable commit point.
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId)
+              draggingRef.current = true
             }}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              scrubRef.current = v
+              setScrub(v)
+            }}
+            onPointerUp={commitScrub}
+            onLostPointerCapture={commitScrub}
+            onKeyUp={commitScrub}
             className="h-1 flex-1 cursor-pointer accent-[rgb(var(--accent))]"
           />
           <span className="tabular-nums">{fmt(dur)}</span>

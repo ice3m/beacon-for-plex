@@ -552,8 +552,15 @@ export interface PlexApi {
     remove: (serverId: string, ratingKey: string) => Promise<WatchlistEntry[]>
   }
   playback: {
-    /** Start playing an item (resumes from its saved offset if any). */
-    start: (serverId: string, ratingKey: string) => Promise<{ ok: boolean; error?: string }>
+    /**
+     * Start playing an item. By default resumes from its saved offset; pass
+     * `{ startMs: 0 }` to watch from the beginning.
+     */
+    start: (
+      serverId: string,
+      ratingKey: string,
+      opts?: { startMs?: number; quality?: string }
+    ) => Promise<{ ok: boolean; error?: string }>
     stop: () => Promise<void>
     playPause: () => Promise<void>
     /** Seek to an absolute position in milliseconds. */

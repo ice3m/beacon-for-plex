@@ -60,10 +60,14 @@ export function DetailView({ serverId, ratingKey }: Props): JSX.Element {
       })
   }
 
-  const play = async (): Promise<void> => {
+  const play = async (fromStart = false): Promise<void> => {
     setActionError(null)
     try {
-      const res = await window.plex.playback.start(serverId, ratingKey)
+      const res = await window.plex.playback.start(
+        serverId,
+        ratingKey,
+        fromStart ? { startMs: 0 } : undefined
+      )
       if (!res.ok) setActionError(res.error ?? 'Playback failed to start')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Playback failed to start')
@@ -139,12 +143,21 @@ export function DetailView({ serverId, ratingKey }: Props): JSX.Element {
           <div className="mb-5 flex items-center gap-3">
             <button
               disabled={!playableType}
-              onClick={play}
+              onClick={() => play()}
               title={playableType ? 'Play' : 'Open an episode/track to play'}
               className="flex items-center gap-2 rounded-lg bg-accent px-6 py-2.5 font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {item.viewOffset ? '▶ Resume' : '▶ Play'}
             </button>
+            {playableType && !!item.viewOffset && (
+              <button
+                onClick={() => play(true)}
+                title="Start from the beginning"
+                className="flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-white/10"
+              >
+                ↺ Watch from Start
+              </button>
+            )}
             <AddToPlaylist serverId={serverId} item={item} />
             {canWatchlist && (
               <button

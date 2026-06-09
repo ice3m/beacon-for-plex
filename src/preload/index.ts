@@ -96,7 +96,8 @@ const api: PlexApi = {
     remove: (serverId, ratingKey) => ipcRenderer.invoke(IPC.watchlist.remove, serverId, ratingKey)
   },
   playback: {
-    start: (serverId, ratingKey) => ipcRenderer.invoke(IPC.playback.start, serverId, ratingKey),
+    start: (serverId, ratingKey, opts) =>
+      ipcRenderer.invoke(IPC.playback.start, serverId, ratingKey, opts),
     stop: () => ipcRenderer.invoke(IPC.playback.stop),
     playPause: () => ipcRenderer.invoke(IPC.playback.playPause),
     seekTo: (ms) => ipcRenderer.invoke(IPC.playback.seekTo, ms),
