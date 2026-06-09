@@ -45,3 +45,6 @@ publish:
   provider: github
   owner: ice3m
   repo: beacon-for-plex
+  # Publish as a full (non-draft) release so electron-updater can see it
+  # immediately — drafts are invisible to the update feed.
+  releaseType: release

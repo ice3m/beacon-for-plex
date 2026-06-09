@@ -889,6 +889,20 @@ export function stopTranscode(serverId: string, sessionId: string): Promise<void
   ).catch(() => {})
 }
 
+/**
+ * Keep a universal-transcode session alive. The PMS reaps an HLS transcode after
+ * a short inactivity window; once mpv has pre-buffered ahead it stops requesting
+ * segments, so without a periodic ping the session is torn down and the next
+ * segment fetch 404s (playback "just stops"). Call this on an interval while a
+ * transcode is active.
+ */
+export function pingTranscode(serverId: string, sessionId: string): Promise<void> {
+  return serverHit(
+    serverId,
+    `/video/:/transcode/universal/ping?session=${encodeURIComponent(sessionId)}`
+  ).catch(() => {})
+}
+
 /** Report playback timeline to the PMS (drives Now Playing + resume). */
 export function reportTimeline(
   serverId: string,

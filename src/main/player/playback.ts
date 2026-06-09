@@ -11,6 +11,7 @@ import {
   getExternalSubs,
   getPlaybackInfo,
   markPlayed,
+  pingTranscode,
   reportTimeline,
   searchSubtitles as searchSubtitlesApi,
   stopTranscode,
@@ -189,6 +190,28 @@ interface Session {
 
 let session: Session | null = null
 
+/**
+ * Heartbeat that keeps the active Plex transcode session alive. Once mpv buffers
+ * ahead it stops fetching segments; without this ping the PMS reaps the session
+ * after ~20-60s of inactivity and playback silently dies (the dreaded "stops a
+ * minute in"). Pings every 10s regardless of pause/buffer state.
+ */
+let transcodePing: ReturnType<typeof setInterval> | null = null
+function startTranscodePing(serverId: string, sessionId: string): void {
+  stopTranscodePing()
+  transcodePing = setInterval(() => {
+    void pingTranscode(serverId, sessionId)
+  }, 10000)
+  // Ping immediately so the session is touched well before the idle window.
+  void pingTranscode(serverId, sessionId)
+}
+function stopTranscodePing(): void {
+  if (transcodePing) {
+    clearInterval(transcodePing)
+    transcodePing = null
+  }
+}
+
 // One long-lived mpv instance, embedded in the persistent window. Created lazily
 // on first play and kept alive (idle between plays) so its video output only
 // initializes once. The 'exit' handler (attached in ensureMpv) clears it.
@@ -238,6 +261,13 @@ async function ensureMpv(): Promise<MpvClient> {
       start(s.serverId, s.nextRatingKey, { quality: s.quality, preserveView: true }).catch((e) =>
         console.error('[player] auto-advance failed:', (e as Error).message)
       )
+    } else if (reason === 'error') {
+      // A dead stream (e.g. the PMS reaped the transcode session) ends the file
+      // with 'error'. Don't die silently — surface it so the user isn't staring
+      // at a frozen frame wondering what happened.
+      console.error('[player] stream ended unexpectedly (mpv end-file: error)')
+      stopTranscodePing()
+      push({ error: 'Playback stopped: the stream ended unexpectedly. Try again or pick a different quality.' })
     }
   })
   client.on('error', (err: Error) => {
@@ -247,6 +277,7 @@ async function ensureMpv(): Promise<MpvClient> {
   client.on('exit', () => {
     console.log('[player] mpv process exited')
     if (session) report('stopped', true)
+    stopTranscodePing()
     mpv = null
     session = null
     hidePlayerWindow()
@@ -514,6 +545,11 @@ export async function start(
     console.error('[player] loadfile failed:', err)
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to load media' }
   }
+  // Keep the transcode session alive (mpv goes silent once buffered). Always
+  // (re)start the heartbeat for the new session id; no-op for direct play.
+  if (transcodeSession) startTranscodePing(serverId, transcodeSession)
+  else stopTranscodePing()
+
   // Title carries special chars, so set it after load (not in the options string).
   client.setProperty('force-media-title', info.title).catch(() => {})
   // mpv's `pause` property persists across loadfile, so a previously-paused
@@ -535,6 +571,7 @@ export async function start(
 
 /** Stop playback: report to Plex, stop the current file (mpv stays idle), hide. */
 export function stop(): void {
+  stopTranscodePing()
   if (session) {
     report('stopped', true) // tell Plex Now Playing ended
     if (session.transcodeSession)
@@ -552,6 +589,7 @@ export function stop(): void {
 
 /** Fully quit the persistent mpv process (called on app exit). */
 export function shutdown(): void {
+  stopTranscodePing()
   if (session) {
     report('stopped', true)
     if (session.transcodeSession)
