@@ -254,10 +254,30 @@ function attemptAutoResume(why: string): void {
   streamErrorReloads++
   lastStreamErrorAt = now
   lastProgressAt = now // don't immediately re-trigger the stall detector
-  console.warn(`[player] auto-resume (${why}) at ${Math.floor(s.timeMs / 1000)}s (try ${streamErrorReloads})`)
-  start(s.serverId, s.ratingKey, { quality: s.quality, startMs: s.timeMs, preserveView: true }).catch(
-    (e) => console.error('[player] auto-resume failed:', (e as Error).message)
-  )
+  const { serverId, ratingKey, quality, timeMs } = s
+  console.warn(`[player] auto-resume (${why}) at ${Math.floor(timeMs / 1000)}s (try ${streamErrorReloads})`)
+
+  // The wedged mpv can't reliably load a new file (its network/demux thread is
+  // stuck on the dead socket — observed: loadfile rejects). Replace it with a
+  // FRESH process, then replay from the current position. Clear refs first so
+  // the dying instance's late 'exit' is a no-op (guarded by `mpv !== client`).
+  if (loadWatchdog) {
+    clearTimeout(loadWatchdog)
+    loadWatchdog = null
+  }
+  const dead = mpv
+  mpv = null
+  session = null
+  try {
+    dead?.quit()
+  } catch {
+    /* ignore */
+  }
+  setTimeout(() => {
+    void start(serverId, ratingKey, { quality, startMs: timeMs, preserveView: true }).catch((e) =>
+      console.error('[player] auto-resume failed:', (e as Error).message)
+    )
+  }, 600)
 }
 
 // Stall detector: a hands-off mid-stream drop often leaves mpv wedged on a dead
@@ -631,7 +651,10 @@ export async function start(
   try {
     await client.load(streamUrl)
   } catch (err) {
-    console.error('[player] loadfile failed:', err)
+    console.error('[player] loadfile failed:', err instanceof Error ? err.message : err)
+    // Don't leave the overlay stuck on the black Loading screen — show a
+    // retryable error (Try again respawns a clean mpv).
+    push({ error: "Couldn't load the stream. Please try again." })
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to load media' }
   }
   // Keep the transcode session alive (mpv goes silent once buffered). Always

@@ -1,6 +1,6 @@
 {
   "name": "plex-desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A customizable, Netflix-inspired desktop streaming client for Plex",
   "main": "./out/main/index.js",
   "author": "Thomas",

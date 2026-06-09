@@ -4,6 +4,10 @@
  * item short and user-facing (a single fix/change per bullet).
  */
 export const RELEASE_NOTES: Record<string, string[]> = {
+  '0.1.10': [
+    'Frozen streams now actually recover: playback reconnects on a fresh player and resumes from where it stalled, instead of getting stuck.',
+    'If a stream genuinely can’t be loaded, you now get a clear error with “Try again” instead of an endless Loading screen.'
+  ],
   '0.1.9': [
     'More robust recovery from dropped streams: playback that stalls mid-stream now auto-resumes from where it froze, even when no error is reported.'
   ],

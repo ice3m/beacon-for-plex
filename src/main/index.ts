@@ -10,7 +10,16 @@ try {
   const tee = (orig: (...a: unknown[]) => void) => (...args: unknown[]): void => {
     orig(...args)
     try {
-      appendFileSync(logPath, args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n')
+      const line = args
+        .map((a) =>
+          a instanceof Error
+            ? a.stack || a.message
+            : typeof a === 'string'
+              ? a
+              : JSON.stringify(a)
+        )
+        .join(' ')
+      appendFileSync(logPath, line + '\n')
     } catch {
       /* ignore */
     }
