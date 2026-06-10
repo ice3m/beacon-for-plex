@@ -4,6 +4,10 @@
  * item short and user-facing (a single fix/change per bullet).
  */
 export const RELEASE_NOTES: Record<string, string[]> = {
+  '0.1.12': [
+    'Playback recovery no longer interrupts you: if a stream is recovering and you start something else, your new pick is kept.',
+    'Internal reliability cleanups around stream recovery and logging.'
+  ],
   '0.1.10': [
     'Frozen streams now actually recover: playback reconnects on a fresh player and resumes from where it stalled, instead of getting stuck.',
     'If a stream genuinely can’t be loaded, you now get a clear error with “Try again” instead of an endless Loading screen.'

@@ -1,18 +1,21 @@
 import { app, BrowserWindow, Menu, nativeImage, shell, Tray } from 'electron'
-import { existsSync, appendFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync, createWriteStream, type WriteStream } from 'node:fs'
 import { join } from 'node:path'
 
 // Tee main-process console output to a file so issues can be traced on packaged
-// builds (where stdout isn't visible) without shipping a debug build. The file
-// is RESET on each launch so it only ever holds the current session and never
-// grows unbounded — to report a problem: reproduce it, then send main.log.
+// builds (where stdout isn't visible) without shipping a debug build. Writes go
+// through an async stream (no blocking I/O on the main thread per line); opening
+// with 'w' RESETS the file each launch, so it only holds the current session and
+// never grows unbounded — to report a problem: reproduce it, then send main.log.
 try {
   const logPath = join(app.getPath('userData'), 'main.log')
+  let logStream: WriteStream | undefined
   try {
-    writeFileSync(logPath, '')
     // Remove the stale verbose mpv.log left by earlier diagnostic builds.
     const oldMpvLog = join(app.getPath('userData'), 'mpv.log')
     if (existsSync(oldMpvLog)) unlinkSync(oldMpvLog)
+    logStream = createWriteStream(logPath, { flags: 'w' })
+    logStream.on('error', () => {})
   } catch {
     /* ignore */
   }
@@ -28,7 +31,7 @@ try {
               : JSON.stringify(a)
         )
         .join(' ')
-      appendFileSync(logPath, line + '\n')
+      logStream?.write(line + '\n')
     } catch {
       /* ignore */
     }

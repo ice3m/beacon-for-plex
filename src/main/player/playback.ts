@@ -234,11 +234,52 @@ const MAX_STREAM_RELOADS = 6
 // Timestamp of the last forward progress (time-pos advance / load / unpause).
 // Drives the stall detector below.
 let lastProgressAt = 0
+// Bumped on every new playback intent (start/stop). A deferred recovery respawn
+// captures this and bails if it changed — so a recovery in flight can't override
+// a play/stop the user kicked off during the respawn delay.
+let playGeneration = 0
 
 /**
- * Reload the current item from its current position — our backend-agnostic
- * reconnect for a dropped/stalled Direct Play stream. Bounded retries (reset
- * after a stable stretch); surfaces an error only once it keeps failing.
+ * Tear down the (likely wedged) mpv and replay the given item from `startMs` on
+ * a FRESH process after `delayMs`. The wedged mpv can't reliably load a new file
+ * (its network/demux thread is stuck on the dead socket — observed: loadfile
+ * rejects), so we replace the process rather than reuse it. Shared by the
+ * automatic stall/error recovery and the manual "Try again".
+ */
+function hardRespawn(s: Session, delayMs: number): void {
+  const { serverId, ratingKey, quality, timeMs } = s
+  // Capture the intent generation; if a newer play/stop happens during the
+  // delay, this respawn is stale and must not clobber it.
+  const gen = playGeneration
+  // Clear refs first so the dying instance's late 'exit' is a no-op (the exit
+  // handler bails when `mpv !== client`).
+  if (loadWatchdog) {
+    clearTimeout(loadWatchdog)
+    loadWatchdog = null
+  }
+  const dead = mpv
+  mpv = null
+  session = null
+  try {
+    dead?.quit()
+  } catch {
+    /* ignore */
+  }
+  setTimeout(() => {
+    if (playGeneration !== gen) {
+      console.log('[player] respawn superseded by a newer action; skipping')
+      return
+    }
+    void start(serverId, ratingKey, { quality, startMs: timeMs, preserveView: true }).catch((e) =>
+      console.error('[player] respawn start failed:', (e as Error).message)
+    )
+  }, delayMs)
+}
+
+/**
+ * Recover a dropped/stalled Direct Play stream by reloading from the current
+ * position. Bounded retries (reset after a stable stretch); surfaces an error
+ * once it keeps failing.
  */
 function attemptAutoResume(why: string): void {
   const s = session
@@ -254,42 +295,29 @@ function attemptAutoResume(why: string): void {
   streamErrorReloads++
   lastStreamErrorAt = now
   lastProgressAt = now // don't immediately re-trigger the stall detector
-  const { serverId, ratingKey, quality, timeMs } = s
-  console.warn(`[player] auto-resume (${why}) at ${Math.floor(timeMs / 1000)}s (try ${streamErrorReloads})`)
-
-  // The wedged mpv can't reliably load a new file (its network/demux thread is
-  // stuck on the dead socket — observed: loadfile rejects). Replace it with a
-  // FRESH process, then replay from the current position. Clear refs first so
-  // the dying instance's late 'exit' is a no-op (guarded by `mpv !== client`).
-  if (loadWatchdog) {
-    clearTimeout(loadWatchdog)
-    loadWatchdog = null
-  }
-  const dead = mpv
-  mpv = null
-  session = null
-  try {
-    dead?.quit()
-  } catch {
-    /* ignore */
-  }
-  setTimeout(() => {
-    void start(serverId, ratingKey, { quality, startMs: timeMs, preserveView: true }).catch((e) =>
-      console.error('[player] auto-resume failed:', (e as Error).message)
-    )
-  }, 600)
+  console.warn(`[player] auto-resume (${why}) at ${Math.floor(s.timeMs / 1000)}s (try ${streamErrorReloads})`)
+  hardRespawn(s, 600)
 }
 
 // Stall detector: a hands-off mid-stream drop often leaves mpv wedged on a dead
 // socket WITHOUT emitting end-file, so playback just hangs. If position stops
 // advancing for ~15s while we should be playing, auto-resume from where we are.
-setInterval(() => {
-  const s = session
-  if (!s || s.paused || !s.loaded) return
-  if (lastProgressAt && Date.now() - lastProgressAt > 15000) {
-    attemptAutoResume('stall')
+// Only runs while something is playing (started/stopped with the session).
+let stallTimer: ReturnType<typeof setInterval> | null = null
+function startStallWatch(): void {
+  if (stallTimer) return
+  stallTimer = setInterval(() => {
+    const s = session
+    if (!s || s.paused || !s.loaded) return
+    if (lastProgressAt && Date.now() - lastProgressAt > 15000) attemptAutoResume('stall')
+  }, 5000)
+}
+function stopStallWatch(): void {
+  if (stallTimer) {
+    clearInterval(stallTimer)
+    stallTimer = null
   }
-}, 5000)
+}
 
 /**
  * Ensure the persistent mpv process + window exist, with event listeners
@@ -354,11 +382,13 @@ async function ensureMpv(): Promise<MpvClient> {
       return
     }
 
-    // Premature end mid-playback — a dropped connection that mpv surfaced as
-    // 'error' OR as a bogus 'eof' far from the real duration (very common on
-    // remote Direct Play, especially right after a seek). Transparently
-    // auto-resume from the current position: our own backend-agnostic reconnect.
-    if ((reason === 'error' || reason === 'eof') && !nearEnd && s.timeMs > 1000) {
+    // Premature end mid-playback → transparently auto-resume (our own backend-
+    // agnostic reconnect). 'error' is always a genuine drop. A bogus 'eof' only
+    // counts as premature when we KNOW the real duration and we're far from it;
+    // with unknown duration (dur === 0) we can't tell a drop from the true end,
+    // so we treat eof as the end (no reload — avoids a loop at an item's finish).
+    const prematureEof = reason === 'eof' && dur > 0 && !nearEnd
+    if ((reason === 'error' || prematureEof) && s.timeMs > 1000) {
       attemptAutoResume(`end-file:${reason}`)
     }
   })
@@ -373,6 +403,7 @@ async function ensureMpv(): Promise<MpvClient> {
     if (mpv !== client) return
     if (session) report('stopped', true)
     stopTranscodePing()
+    stopStallWatch()
     if (loadWatchdog) clearTimeout(loadWatchdog)
     mpv = null
     session = null
@@ -513,6 +544,8 @@ export async function start(
 ): Promise<{ ok: boolean; error?: string }> {
   if (!mainWindow) return { ok: false, error: 'No window' }
   console.log('[player] start', ratingKey)
+  // New playback intent — invalidates any recovery respawn still pending.
+  playGeneration++
   // A fresh, user-initiated play resets the auto-resume retry budget (internal
   // reloads pass preserveView so they keep counting toward the cap).
   if (!opts.preserveView) {
@@ -669,6 +702,7 @@ export async function start(
   client.setProperty('pause', false).catch(() => {})
   session.paused = false
   lastProgressAt = Date.now() // start the stall clock for this load
+  startStallWatch()
   report('playing', true)
   push()
 
@@ -692,32 +726,22 @@ export async function start(
  */
 export function retry(): void {
   if (!session) return
-  const { serverId, ratingKey, quality, timeMs } = session
-  if (loadWatchdog) {
-    clearTimeout(loadWatchdog)
-    loadWatchdog = null
-  }
-  // Drop the (likely wedged) mpv; clear refs first so its late 'exit' is a no-op
-  // (the exit handler bails when `mpv !== client`).
-  const dead = mpv
-  mpv = null
-  session = null
-  try {
-    dead?.quit()
-  } catch {
-    /* ignore */
-  }
-  // Brief delay so the old process is gone before we spawn a fresh one.
-  setTimeout(() => {
-    void start(serverId, ratingKey, { quality, startMs: timeMs }).catch((e) =>
-      console.error('[player] retry failed:', (e as Error).message)
-    )
-  }, 700)
+  // User-initiated, so start with a fresh recovery budget.
+  streamErrorReloads = 0
+  lastStreamErrorAt = 0
+  hardRespawn(session, 700)
 }
 
 /** Stop playback: report to Plex, stop the current file (mpv stays idle), hide. */
 export function stop(): void {
   console.log('[player] stop requested')
+  // New intent — cancel any pending recovery respawn and end the stall watch.
+  playGeneration++
+  stopStallWatch()
+  if (loadWatchdog) {
+    clearTimeout(loadWatchdog)
+    loadWatchdog = null
+  }
   stopTranscodePing()
   if (session) {
     report('stopped', true) // tell Plex Now Playing ended
@@ -736,6 +760,8 @@ export function stop(): void {
 
 /** Fully quit the persistent mpv process (called on app exit). */
 export function shutdown(): void {
+  playGeneration++
+  stopStallWatch()
   stopTranscodePing()
   if (session) {
     report('stopped', true)
