@@ -31,6 +31,7 @@ export function PlayerOverlay(): JSX.Element {
   const [subs, setSubs] = useState<SubtitleOption[]>([])
   const hideTimer = useRef<ReturnType<typeof setTimeout>>()
   const pausedRef = useRef(false)
+  const fullscreenRef = useRef(false)
 
   // The overlay window must be see-through where there's no chrome.
   useEffect(() => {
@@ -41,6 +42,7 @@ export function PlayerOverlay(): JSX.Element {
     const unsub = window.plex.playback.onStatus((s) => {
       setSt(s)
       pausedRef.current = !!s.paused
+      fullscreenRef.current = !!s.fullscreen
       // Release the held scrub position only once playback has actually caught
       // up to where the user dropped it. Clearing earlier would snap the slider
       // back to live time, and that value-change fires a spurious onChange →
@@ -107,7 +109,13 @@ export function PlayerOverlay(): JSX.Element {
     else if (e.key === 'ArrowLeft') void window.plex.playback.seekBy(-10)
     else if (e.key === 'f' || e.key === 'F') void window.plex.playback.toggleFullscreen()
     else if (e.key === 'p' || e.key === 'P') void window.plex.playback.togglePip()
-    else if (e.key === 'Escape') void window.plex.playback.minimize()
+    else if (e.key === 'Escape') {
+      // In fullscreen, Escape just exits fullscreen (back to the windowed
+      // player) — it should NOT dock to the mini-player. Only minimize when
+      // already windowed.
+      if (fullscreenRef.current) void window.plex.playback.toggleFullscreen()
+      else void window.plex.playback.minimize()
+    }
   }
 
   const openSettings = async (): Promise<void> => {

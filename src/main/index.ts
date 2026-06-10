@@ -132,12 +132,22 @@ function createWindow(): void {
     }
   })
 
-  // Restore maximized / fullscreen state from the last session before showing.
+  // Restore maximized state from the last session before showing. We do NOT
+  // restore fullscreen: this is a frameless window, so opening fullscreen with
+  // no title bar can trap the user with no way out — and "fullscreen" usually
+  // came from transient playback, not a deliberate window preference.
   const flags = getWindowFlags()
   win.on('ready-to-show', () => {
-    if (flags.fullscreen) win.setFullScreen(true)
-    else if (flags.maximized) win.maximize()
+    if (flags.maximized) win.maximize()
     win.show()
+  })
+
+  // Escape hatch: F11 toggles fullscreen; Escape leaves it. Guarantees the user
+  // can always get out of a fullscreen window even with no title bar visible.
+  win.webContents.on('before-input-event', (_e, input) => {
+    if (input.type !== 'keyDown') return
+    if (input.key === 'F11') win.setFullScreen(!win.isFullScreen())
+    else if (input.key === 'Escape' && win.isFullScreen()) win.setFullScreen(false)
   })
   mainWindow = win
   setPlayerWindow(win)
@@ -167,11 +177,11 @@ function createWindow(): void {
   win.on('resize', saveBounds)
   win.on('moved', saveBounds)
 
-  // Persist maximized / fullscreen transitions so they survive a restart.
+  // Persist maximized transitions so they survive a restart. We intentionally
+  // do NOT persist fullscreen — playback/cast toggles the window's fullscreen,
+  // and saving that would reopen the chrome-less window fullscreen next launch.
   win.on('maximize', () => setWindowFlags({ maximized: true }))
   win.on('unmaximize', () => setWindowFlags({ maximized: false }))
-  win.on('enter-full-screen', () => setWindowFlags({ fullscreen: true }))
-  win.on('leave-full-screen', () => setWindowFlags({ fullscreen: false }))
 
   // Open target=_blank / external links in the system browser, not in-app —
   // but only safe web schemes (never file:/javascript:/etc.).

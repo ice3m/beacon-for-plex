@@ -4,6 +4,10 @@
  * item short and user-facing (a single fix/change per bullet).
  */
 export const RELEASE_NOTES: Record<string, string[]> = {
+  '0.1.13': [
+    'Fixed the app sometimes opening fullscreen with no way out — it no longer reopens fullscreen, and F11 toggles / Escape exits a fullscreen window.',
+    'While watching, Escape now just exits fullscreen (back to the windowed player) instead of shrinking to the mini-player.'
+  ],
   '0.1.12': [
     'Playback recovery no longer interrupts you: if a stream is recovering and you start something else, your new pick is kept.',
     'Internal reliability cleanups around stream recovery and logging.'
